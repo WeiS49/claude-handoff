@@ -20,10 +20,13 @@ agent 写的笔记只用来记录机器读不到的东西：为什么这样决�
   最多 2000 个字符。目录不是 git 仓库时会如实说明。
 - `claude-handoff hook session-start` 是给 Claude Code SessionStart hook 用的命令：从 stdin
   读 hook 的 JSON，输出其中 `cwd` 目录的简报。在 `settings.json` 里注册 hook 仍需自己做。
+- `claude-handoff hook stop` 是给 Claude Code Stop hook 用的命令：把会话的最后一条回复连同
+  当时的分支和 HEAD 写进本机的一份交接文件，每轮回复结束时覆盖一次。交接文件已能写入，尚未
+  在简报里显示。
 
 计划中，尚未实现：
 
-- 会话结束或压缩时写一份交接文件，每次覆盖。
+- 在简报里显示上一个会话的交接文件。
 - 过期检查：交接比最新 commit 旧，或者提到的分支、文件已不存在时，标记为可能过期。
 - 在简报里带上项目自身检查命令的结果。
 - 打包成 Claude Code 插件。
@@ -52,6 +55,31 @@ echo '{"cwd": "/path/to/project"}' | uv run claude-handoff hook session-start
 
 hook 不会让会话启动失败：stdin 为空、不是合法 JSON、没有 `cwd`、或 `cwd` 不是一个存在的目录
 时，什么都不输出，退出码 0。
+
+### 作为 Stop hook
+
+Claude Code 每结束一轮回复就运行一次 Stop hook，并在 stdin 里给出 `last_assistant_message`。
+`hook stop` 把这条回复、会话 id、分支和 HEAD 的完整 sha 写进该项目的交接文件，替换上一份。
+项目以 `cwd` 所在 git 仓库的根目录为准；不在 git 仓库里时就是 `cwd` 本身。压缩不会触发 Stop
+hook，所以压缩时不写入。
+
+```bash
+echo '{"cwd": "/path/to/project", "last_assistant_message": "Finished the parser."}' \
+  | uv run claude-handoff hook stop
+```
+
+交接文件放在项目目录之外，不会出现在 `git status` 里，也不会被误提交。状态目录按以下顺序取第
+一个可用的：
+
+1. 环境变量 `CLAUDE_HANDOFF_STATE_DIR` 有值时用它；
+2. `XDG_STATE_HOME` 有值时用 `$XDG_STATE_HOME/claude-handoff`；
+3. 否则用 `~/.local/state/claude-handoff`。
+
+每个项目在其中有一个文件，文件名是项目绝对路径的 sha256 十六进制前 16 位。目录以权限 `0700`
+创建，文件权限为 `0600`。超过 4000 个字符的回复保存前 3999 个字符加 `…`。
+
+hook 什么都不输出，退出码总是 0。输入不是 JSON 对象、`cwd` 不是一个存在的目录、或
+`last_assistant_message` 缺失或只有空白时，不写入任何东西，已有的交接文件保持不变。
 
 ## 开发
 

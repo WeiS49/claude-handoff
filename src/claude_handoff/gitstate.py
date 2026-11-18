@@ -16,6 +16,8 @@ class GitState:
     dirty_files: tuple[str, ...] = ()
     recent_commits: tuple[str, ...] = field(default=())
     last_commit_iso: str | None = None
+    head_sha: str | None = None
+    toplevel: Path | None = None
 
 
 def _git(cwd: Path, *args: str) -> str | None:
@@ -48,10 +50,17 @@ def _parse_status(raw: str) -> tuple[str, ...]:
     return tuple(paths)
 
 
+def git_toplevel(cwd: Path) -> Path | None:
+    """The resolved root of the work tree that contains ``cwd``, or None outside a work tree."""
+    top = _git(cwd, "rev-parse", "--show-toplevel")
+    return Path(top).resolve() if top else None
+
+
 def read_git_state(cwd: Path, max_commits: int = 5) -> GitState:
-    """Collect branch, uncommitted files and recent commits for ``cwd``.
+    """Collect branch, uncommitted files, recent commits, HEAD and work tree root for ``cwd``.
 
     A directory that is not inside a git work tree yields ``GitState(is_repo=False)``.
+    ``head_sha`` is None before the first commit; ``branch`` is None on a detached HEAD.
     """
     if _git(cwd, "rev-parse", "--is-inside-work-tree") != "true":
         return GitState(is_repo=False)
@@ -61,10 +70,13 @@ def read_git_state(cwd: Path, max_commits: int = 5) -> GitState:
     log = _git(cwd, "log", f"-{max_commits}", "--date=short", "--format=%ad %s") or ""
     commits = tuple(line for line in log.splitlines() if line)
     last = _git(cwd, "log", "-1", "--format=%cI") or None
+    head = _git(cwd, "rev-parse", "--verify", "HEAD") or None
     return GitState(
         is_repo=True,
         branch=branch,
         dirty_files=dirty,
         recent_commits=commits,
         last_commit_iso=last,
+        head_sha=head,
+        toplevel=git_toplevel(cwd),
     )

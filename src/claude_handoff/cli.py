@@ -7,7 +7,7 @@ from pathlib import Path
 
 from . import __version__
 from .briefing import MAX_CHARS, build_briefing
-from .hook import run_session_start
+from .hook import run_session_start, run_stop
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -28,12 +28,18 @@ def main(argv: list[str] | None = None) -> int:
         "session-start",
         help="read SessionStart hook JSON from stdin and print the briefing for its cwd",
     )
+    hook_sub.add_parser(
+        "stop",
+        help="read Stop hook JSON from stdin and save its last reply to this machine's state",
+    )
 
     args = parser.parse_args(argv)
     if args.command == "brief":
         print(build_briefing(args.cwd.resolve(), args.max_chars))
     elif args.command == "hook" and args.hook_event == "session-start":
         return run_session_start()
+    elif args.command == "hook" and args.hook_event == "stop":
+        return run_stop()
     return 0
 
 

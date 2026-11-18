@@ -2,7 +2,8 @@
 
 Each project has its own directory, and each session one JSON file in it, replaced as a whole
 on every write. All work trees of one git repository are one project (see ``project_root``),
-so a session in one work tree sees where sessions in the others stopped. Only the newest ``MAX_SESSIONS`` files of a project are kept, so parallel
+so a session in one work tree sees where sessions in the others stopped. Only ``MAX_SESSIONS``
+files of a project are kept, records of unattended sessions deleted first, so parallel
 sessions in one project do not overwrite each other. The state lives outside the project so
 it never shows up in ``git status`` and cannot be committed by mistake: the saved reply may
 contain anything the session saw.
@@ -153,22 +154,31 @@ def _session_files(directory: Path) -> list[Path]:
     ]
 
 
-def _age_key(path: Path) -> tuple[datetime, str]:
-    """Sort key, oldest first: ``written_at``, then the file name. Unusable files come first."""
+def _prune_key(path: Path) -> tuple[bool, datetime, str]:
+    """Sort key, first to delete first.
+
+    Unusable files and unattended records (``"attended": false``) form the first tier, every
+    other record the second. Within a tier: ``written_at`` (unusable files count as the
+    oldest), then the file name.
+    """
     record = _load_record(path)
-    return (_OLDEST if record is None else record[0], path.name)
+    if record is None:
+        return (False, _OLDEST, path.name)
+    written_at, data = record
+    return (data.get("attended") is not False, written_at, path.name)
 
 
 def _prune(directory: Path, keep: Path) -> None:
-    """Delete the oldest session files in ``directory`` until ``MAX_SESSIONS`` remain.
+    """Delete session files in ``directory`` until ``MAX_SESSIONS`` remain.
 
-    ``keep``, the file just written, is never deleted, even if a clock set back or a tie makes
+    Unusable files and unattended records go first, oldest first; only then the oldest of the
+    rest (see ``_prune_key``). ``keep``, the file just written, is never deleted, even if a clock set back or a tie makes
     it sort as the oldest. Failures are swallowed: pruning must not undo a successful write.
     """
     try:
         others = sorted(
             (path for path in _session_files(directory) if path.name != keep.name),
-            key=_age_key,
+            key=_prune_key,
         )
     except OSError:
         return
@@ -187,6 +197,7 @@ def write_state(
     branch: str | None,
     head: str | None,
     message: str,
+    attended: bool | None = None,
 ) -> Path:
     """Replace the state file of this session of ``project`` atomically and return its path.
 
@@ -194,6 +205,9 @@ def write_state(
     target, so a reader sees either the old file or the new one. On failure the temporary
     file is removed and the exception is raised. After a successful write only the newest
     ``MAX_SESSIONS`` session files of the project are kept.
+
+    ``attended`` False adds ``"attended": false`` as the last key, marking a session nobody
+    was present for; True or None writes no such key, so the file is as it always was.
     """
     session = session_id if isinstance(session_id, str) else None
     target = state_path(project, session)
@@ -209,6 +223,8 @@ def write_state(
         "head": head,
         "message": clip_message(message),
     }
+    if attended is False:
+        data["attended"] = False
     text = json.dumps(data, ensure_ascii=False, indent=2) + "\n"
     fd, tmp_name = tempfile.mkstemp(dir=target.parent, prefix=TEMP_PREFIX, suffix=SUFFIX)
     try:

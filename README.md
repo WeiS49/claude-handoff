@@ -28,7 +28,9 @@ Early. What works today:
 - `claude-handoff hook stop` is the command for a Claude Code Stop hook. It saves the
   session's last reply, with the branch and HEAD at that moment, to a handoff file on this
   machine: one file per session, replaced every time a reply in that session ends, and the
-  5 most recent sessions kept per project.
+  5 most recent sessions kept per project. Sessions nobody is present for (`claude -p`) are
+  marked, left out of the briefing and deleted first. See
+  [Unattended sessions](#unattended-sessions).
 - After the git state, the briefing quotes where the most recent earlier sessions of the
   project stopped, and marks each record as up to date or possibly stale, judged from git:
   commits made since, a commit no longer in the history, a branch that was switched or
@@ -103,8 +105,10 @@ Inside it, each project has a directory and each session a file in that director
 
 The project hash is the first 16 hex digits of the sha256 of the project's absolute path; the
 session hash is the same for the `session_id`. Input without a string `session_id` is saved
-to `unknown.json`. Only the 5 most recent sessions of a project are kept: after each write,
-older files (by the `written_at` time inside them) are deleted, never the one just written.
+to `unknown.json`. Only 5 sessions of a project are kept: after each write, the records of
+[unattended sessions](#unattended-sessions) and unreadable files are deleted first, oldest
+first, and only then the oldest of the rest (by the `written_at` time inside them). The file
+just written is never deleted.
 Directories are created with mode `0700` and files with `0600`. A reply longer than 4000
 characters is cut to 3999 characters plus `…`.
 
@@ -115,13 +119,35 @@ The hook prints nothing and always exits 0. If the input is not a JSON object, `
 name an existing directory, or `last_assistant_message` is missing or blank, nothing is
 written and existing handoff files are left as they were.
 
+### Unattended sessions
+
+Sessions started by scripts and tools with `claude -p` run the Stop hook too. Their replies
+are recorded, but marked, so they do not crowd out the sessions someone was present for.
+Claude Code sets `CLAUDE_CODE_SESSION_ATTENDED` for hook processes: `1` in an interactive
+session, `0` in an unattended one, also when `claude -p` is started from an interactive
+session's shell. The variable is not documented and may be renamed or removed, so only the
+exact value `0` counts as unattended; any other value, an empty one, or none at all counts as
+attended.
+
+- `hook stop` in an unattended session adds `"attended": false` as the last key of the
+  handoff file. Otherwise the file has no `attended` key, as before.
+- The briefing (`brief` and `hook session-start`) leaves unattended records out: they are not
+  shown and not counted in `… and N more`. With only unattended records the section and the
+  `Full text of these replies` line are left out.
+- `show` still lists every record, numbered as before, and ends the title line of an
+  unattended one with ` · unattended`.
+- When a project has more than 5 sessions, unattended records are deleted first (see above).
+
+A record without the `attended` key, or with any value other than `false`, counts as
+attended. Existing records are not changed.
+
 ### Earlier sessions in the briefing
 
 When the project has handoff files, `brief` and `hook session-start` add a section after the
 git state. It shows the 3 newest records, newest first, and says how many more there are.
 `hook session-start` leaves out the record of its own `session_id`, so a resumed or compacted
-session is not shown its own last reply. Without any record to show, the section is left out
-entirely.
+session is not shown its own last reply. Records of [unattended sessions](#unattended-sessions)
+are left out too. Without any record to show, the section is left out entirely.
 
 ```
 [claude-handoff] State of project, read just now:
@@ -169,8 +195,10 @@ uv run claude-handoff show [--cwd /path/to/project] [--index N]
 ```
 
 `show` prints every saved record of the project of `--cwd` (default: the current directory),
-newest first and numbered from 1, including the current session's own record. Each title line
-is the briefing's title line with `[N] ` in place of `- `. The reply is the saved text (at most
+newest first and numbered from 1, including the current session's own record and those of
+unattended sessions. Each title line is the briefing's title line with `[N] ` in place of
+`- `; for an unattended session it ends in ` · unattended` (`[2] 5 min ago · unattended`
+outside git). The reply is the saved text (at most
 4000 characters), not cut and with nothing left out: code blocks and quoted lines stay, and
 each line is prefixed with `  > `; a blank line becomes a bare `  >`.
 

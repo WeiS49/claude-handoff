@@ -30,6 +30,7 @@ NO_SAVED = "No saved sessions for this project."
 MAX_SESSIONS_SHOWN = 3
 NEWEST_QUOTE_CHARS = 600
 QUOTE_CHARS = 200
+UNATTENDED_SUFFIX = " · unattended"
 
 
 def _clip(line: str, width: int = 100) -> str:
@@ -220,6 +221,14 @@ def _quote_full(message: object) -> list[str]:
     return [f"{QUOTE}{line}" if line.strip() else bare for line in message.strip().splitlines()]
 
 
+def _unattended(record: dict[str, Any]) -> bool:
+    """Whether ``record`` was saved by an unattended session: ``attended`` is exactly False.
+
+    A record without the key, or with any other value, counts as attended.
+    """
+    return record.get("attended") is False
+
+
 def render_saved(
     records: list[dict[str, Any]],
     git: GitState,
@@ -230,14 +239,16 @@ def render_saved(
     """Lines for ``show``: a header, then every record (or only number ``index``) in full.
 
     ``records`` are ordered newest first and numbered from 1. Each title is the briefing's
-    title with ``[N] `` in place of ``- ``. The saved reply is quoted whole, with no limit.
+    title with ``[N] `` in place of ``- ``, ending in ``UNATTENDED_SUFFIX`` for an unattended
+    record; unattended records are listed and numbered like the others. The saved reply is quoted whole, with no limit.
     ``index`` must be between 1 and ``len(records)``; the caller checks it.
     """
     lines = [SAVED_TITLE.format(name=store.project_root(cwd).name)]
     for number, record in enumerate(records, start=1):
         if index is not None and number != index:
             continue
-        lines.append(f"[{number}] {_title_body(record, git, cwd, now)}")
+        suffix = UNATTENDED_SUFFIX if _unattended(record) else ""
+        lines.append(f"[{number}] {_title_body(record, git, cwd, now)}{suffix}")
         lines += _quote_full(record.get("message"))
     return lines
 
@@ -259,7 +270,8 @@ def build_briefing(
 ) -> str:
     """The briefing for ``cwd``: a header plus every section that has something to say.
 
-    The records of ``session_id``, the session the briefing is for, are left out. When there
+    The records of ``session_id``, the session the briefing is for, and of unattended sessions
+    (``"attended": false``) are left out, and do not count towards ``… and N more``. When there
     are earlier sessions, the last line names the command that prints their replies in full.
     Room for that line is set aside before the rest is cut to fit, so it is never cut off; it
     is left out only when ``max_chars`` is too small to hold it.
@@ -270,7 +282,8 @@ def build_briefing(
     records = [
         record
         for record in store.read_states(store.project_root(cwd))
-        if session_id is None or record.get("session_id") != session_id
+        if (session_id is None or record.get("session_id") != session_id)
+        and not _unattended(record)
     ]
     sessions = render_sessions(records, git, cwd, store._now() if now is None else now)
     lines += sessions

@@ -38,6 +38,16 @@ def isolated_state_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     return state
 
 
+@pytest.fixture(autouse=True)
+def attended_session(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Remove CLAUDE_CODE_SESSION_ATTENDED for every test, subprocesses included.
+
+    ``./check`` may run inside an unattended Claude session, which sets it to ``0``; inherited
+    by the hook subprocesses, it would mark every record unattended and hide it from briefings.
+    """
+    monkeypatch.delenv("CLAUDE_CODE_SESSION_ATTENDED", raising=False)
+
+
 @pytest.fixture
 def run_git():
     """The helper that runs git with a fixed test identity."""

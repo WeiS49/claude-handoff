@@ -21,8 +21,8 @@ agent 写的笔记只用来记录机器读不到的东西：为什么这样决�
 - `claude-handoff hook session-start` 是给 Claude Code SessionStart hook 用的命令：从 stdin
   读 hook 的 JSON，输出其中 `cwd` 目录的简报。在 `settings.json` 里注册 hook 仍需自己做。
 - `claude-handoff hook stop` 是给 Claude Code Stop hook 用的命令：把会话的最后一条回复连同
-  当时的分支和 HEAD 写进本机的一份交接文件，每轮回复结束时覆盖一次。交接文件已能写入，尚未
-  在简报里显示。
+  当时的分支和 HEAD 写进本机的交接文件：每个会话一个文件，该会话每轮回复结束时覆盖一次，
+  每个项目保留最近 5 个会话。交接文件已能写入，尚未在简报里显示。
 
 计划中，尚未实现：
 
@@ -59,12 +59,12 @@ hook 不会让会话启动失败：stdin 为空、不是合法 JSON、没有 `cw
 ### 作为 Stop hook
 
 Claude Code 每结束一轮回复就运行一次 Stop hook，并在 stdin 里给出 `last_assistant_message`。
-`hook stop` 把这条回复、会话 id、分支和 HEAD 的完整 sha 写进该项目的交接文件，替换上一份。
-项目以 `cwd` 所在 git 仓库的根目录为准；不在 git 仓库里时就是 `cwd` 本身。压缩不会触发 Stop
+`hook stop` 把这条回复、会话 id、分支和 HEAD 的完整 sha 写进该项目里这个会话的交接文件，
+替换这个会话的上一份。同一项目里并行的多个会话各有自己的文件，互不覆盖。项目以 `cwd` 所在 git 仓库的根目录为准；不在 git 仓库里时就是 `cwd` 本身。压缩不会触发 Stop
 hook，所以压缩时不写入。
 
 ```bash
-echo '{"cwd": "/path/to/project", "last_assistant_message": "Finished the parser."}' \
+echo '{"session_id": "abc", "cwd": "/path/to/project", "last_assistant_message": "Finished the parser."}' \
   | uv run claude-handoff hook stop
 ```
 
@@ -75,8 +75,19 @@ echo '{"cwd": "/path/to/project", "last_assistant_message": "Finished the parser
 2. `XDG_STATE_HOME` 有值时用 `$XDG_STATE_HOME/claude-handoff`；
 3. 否则用 `~/.local/state/claude-handoff`。
 
-每个项目在其中有一个文件，文件名是项目绝对路径的 sha256 十六进制前 16 位。目录以权限 `0700`
-创建，文件权限为 `0600`。超过 4000 个字符的回复保存前 3999 个字符加 `…`。
+每个项目在其中有一个目录，每个会话在该目录里有一个文件：
+
+```
+<状态目录>/<项目哈希>/<会话哈希>.json
+```
+
+项目哈希是项目绝对路径的 sha256 十六进制前 16 位，会话哈希是 `session_id` 的 sha256 十六进制
+前 16 位。输入里没有字符串类型的 `session_id` 时写入 `unknown.json`。每个项目只保留最近 5 个
+会话：每次写入后，按文件里的 `written_at` 删除更旧的文件，刚写入的那个永不删除。目录以权限
+`0700` 创建，文件权限为 `0600`。超过 4000 个字符的回复保存前 3999 个字符加 `…`。
+
+早期版本在状态目录顶层为每个项目只存一个 `<项目哈希>.json`。这些文件不再被读取，也不会被自动
+删除，可以手动删掉。
 
 hook 什么都不输出，退出码总是 0。输入不是 JSON 对象、`cwd` 不是一个存在的目录、或
 `last_assistant_message` 缺失或只有空白时，不写入任何东西，已有的交接文件保持不变。

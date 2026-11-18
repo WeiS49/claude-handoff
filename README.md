@@ -27,7 +27,8 @@ Early. What works today:
   hook in `settings.json` is still up to you.
 - `claude-handoff hook stop` is the command for a Claude Code Stop hook. It saves the
   session's last reply, with the branch and HEAD at that moment, to a handoff file on this
-  machine, replaced every time a reply ends. The file is written but not yet shown in the
+  machine: one file per session, replaced every time a reply in that session ends, and the
+  5 most recent sessions kept per project. The files are written but not yet shown in the
   briefing.
 
 Planned, not built yet:
@@ -68,29 +69,42 @@ missing or does not name an existing directory, it prints nothing and exits 0.
 
 Claude Code runs a Stop hook each time it finishes a reply and passes `last_assistant_message`
 on stdin. `hook stop` saves that message, the session id, the branch and the full HEAD sha
-to the handoff file of the project, replacing the previous one. The project is the root of
+to the handoff file of that session in the project, replacing the session's previous one.
+Parallel sessions in the same project each keep their own file. The project is the root of
 the git repository that contains `cwd`, or `cwd` itself outside git. Compaction does not run
 a Stop hook, so nothing is written at compaction.
 
 ```bash
-echo '{"cwd": "/path/to/project", "last_assistant_message": "Finished the parser."}' \
+echo '{"session_id": "abc", "cwd": "/path/to/project", "last_assistant_message": "Finished the parser."}' \
   | uv run claude-handoff hook stop
 ```
 
-The handoff file is kept outside the project, so it never shows in `git status` and cannot be
+The handoff files are kept outside the project, so it never shows in `git status` and cannot be
 committed by mistake. The state directory is the first of:
 
 1. `$CLAUDE_HANDOFF_STATE_DIR`, if set;
 2. `$XDG_STATE_HOME/claude-handoff`, if `XDG_STATE_HOME` is set;
 3. `~/.local/state/claude-handoff`.
 
-Each project has one file there, named after the first 16 hex digits of the sha256 of the
-project's absolute path. The directory is created with mode `0700` and the file with `0600`.
-A reply longer than 4000 characters is cut to 3999 characters plus `…`.
+Inside it, each project has a directory and each session a file in that directory:
+
+```
+<state directory>/<project hash>/<session hash>.json
+```
+
+The project hash is the first 16 hex digits of the sha256 of the project's absolute path; the
+session hash is the same for the `session_id`. Input without a string `session_id` is saved
+to `unknown.json`. Only the 5 most recent sessions of a project are kept: after each write,
+older files (by the `written_at` time inside them) are deleted, never the one just written.
+Directories are created with mode `0700` and files with `0600`. A reply longer than 4000
+characters is cut to 3999 characters plus `…`.
+
+Earlier versions kept a single `<project hash>.json` per project at the top of the state
+directory. Such files are no longer read and are not removed; you can delete them.
 
 The hook prints nothing and always exits 0. If the input is not a JSON object, `cwd` does not
 name an existing directory, or `last_assistant_message` is missing or blank, nothing is
-written and an existing handoff file is left as it was.
+written and existing handoff files are left as they were.
 
 ## Develop
 

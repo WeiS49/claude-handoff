@@ -45,15 +45,36 @@ def _stop_payload(cwd: Path, message: str = "Finished the parser.") -> bytes:
     )
 
 
-def _expected_file(state: Path, project: Path) -> Path:
-    digest = hashlib.sha256(str(project.resolve()).encode("utf-8")).hexdigest()[:16]
-    return state / f"{digest}.json"
+def _digest(text: str) -> str:
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
+
+
+def _project_dir(state: Path, project: Path) -> Path:
+    return state / _digest(str(project.resolve()))
+
+
+def _expected_file(state: Path, project: Path, session_id: str = "abc") -> Path:
+    return _project_dir(state, project) / f"{_digest(session_id)}.json"
+
+
+def _project_files(state: Path) -> list[Path]:
+    """The files in the only project directory under ``state``."""
+    projects = list(state.iterdir())
+    assert len(projects) == 1
+    assert projects[0].is_dir()
+    return sorted(projects[0].iterdir())
 
 
 def _only_file(state: Path) -> Path:
-    files = list(state.iterdir())
+    files = _project_files(state)
     assert len(files) == 1
     return files[0]
+
+
+def _messages(state: Path) -> dict[str | None, str]:
+    """``session_id`` to ``message`` for every file in the only project directory."""
+    records = [json.loads(path.read_text(encoding="utf-8")) for path in _project_files(state)]
+    return {data["session_id"]: data["message"] for data in records}
 
 
 def _head(repo: Path) -> str:
@@ -134,7 +155,9 @@ def test_stop_repo_without_commits(state: Path, tmp_path: Path, run_git) -> None
 def test_stop_relative_cwd_resolves_against_working_directory(repo: Path, state: Path) -> None:
     stdin = _payload(cwd=".", last_assistant_message="done")
     assert _stop(stdin, state, repo).returncode == 0
-    data = json.loads(_only_file(state).read_text(encoding="utf-8"))
+    path = _only_file(state)
+    assert path == _project_dir(state, repo) / "unknown.json"
+    data = json.loads(path.read_text(encoding="utf-8"))
     assert data["project"] == str(repo.resolve())
     assert data["session_id"] is None
 
@@ -220,6 +243,7 @@ def test_stop_file_and_directory_permissions(repo: Path, state: Path, tmp_path: 
     assert not state.exists()
     assert _stop(_stop_payload(repo), state, tmp_path).returncode == 0
     assert stat.S_IMODE(state.stat().st_mode) == 0o700
+    assert stat.S_IMODE(_project_dir(state, repo).stat().st_mode) == 0o700
     assert stat.S_IMODE(_only_file(state).stat().st_mode) == 0o600
 
 
@@ -238,3 +262,66 @@ def test_stop_is_silent(repo: Path, state: Path, tmp_path: Path) -> None:
     assert result.stdout == b""
     assert result.stderr == b""
     assert _only_file(state).is_file()
+
+
+def _session_payload(cwd: Path, session_id: object, message: str) -> bytes:
+    return _payload(
+        session_id=session_id, cwd=str(cwd), hook_event_name="Stop", last_assistant_message=message
+    )
+
+
+def test_stop_keeps_one_file_per_session(repo: Path, state: Path, tmp_path: Path) -> None:
+    a = _session_payload(repo, "session-A", "A: refactoring the parser, half done.")
+    b = _session_payload(repo, "session-B", "B: answered a quick question.")
+    assert _stop(a, state, tmp_path).returncode == 0
+    assert _stop(b, state, tmp_path).returncode == 0
+    assert _project_files(state) == sorted(
+        [_expected_file(state, repo, "session-A"), _expected_file(state, repo, "session-B")]
+    )
+    assert _messages(state) == {
+        "session-A": "A: refactoring the parser, half done.",
+        "session-B": "B: answered a quick question.",
+    }
+
+
+def test_stop_same_session_replaces_its_own_file(
+    repo: Path, state: Path, tmp_path: Path
+) -> None:
+    assert _stop(_session_payload(repo, "session-A", "A1"), state, tmp_path).returncode == 0
+    assert _stop(_session_payload(repo, "session-B", "B"), state, tmp_path).returncode == 0
+    assert _stop(_session_payload(repo, "session-A", "A2"), state, tmp_path).returncode == 0
+    assert len(_project_files(state)) == 2
+    assert _messages(state) == {"session-A": "A2", "session-B": "B"}
+    data = json.loads(_expected_file(state, repo, "session-A").read_text(encoding="utf-8"))
+    assert set(data) == KEYS
+    assert data["message"] == "A2"
+
+
+SESSIONLESS: dict[str, Callable[[Path], bytes]] = {
+    "missing": lambda repo: _payload(cwd=str(repo), last_assistant_message="done"),
+    "null": lambda repo: _session_payload(repo, None, "done"),
+    "number": lambda repo: _session_payload(repo, 42, "done"),
+    "list": lambda repo: _session_payload(repo, ["abc"], "done"),
+}
+
+
+@pytest.mark.parametrize("make_input", SESSIONLESS.values(), ids=SESSIONLESS.keys())
+def test_stop_without_session_id_uses_unknown(
+    make_input: Callable[[Path], bytes], repo: Path, state: Path, tmp_path: Path
+) -> None:
+    assert _stop(make_input(repo), state, tmp_path).returncode == 0
+    path = _only_file(state)
+    assert path == _project_dir(state, repo) / "unknown.json"
+    data = json.loads(path.read_text(encoding="utf-8"))
+    assert set(data) == KEYS
+    assert data["session_id"] is None
+    assert data["message"] == "done"
+
+
+def test_stop_keeps_newest_five_sessions(repo: Path, state: Path, tmp_path: Path) -> None:
+    for i in range(6):
+        stdin = _session_payload(repo, f"session-{i}", f"message {i}")
+        assert _stop(stdin, state, tmp_path).returncode == 0
+    files = _project_files(state)
+    assert len(files) == 5
+    assert _expected_file(state, repo, "session-5") in files

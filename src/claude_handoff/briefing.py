@@ -136,11 +136,38 @@ def _title(record: dict[str, Any], git: GitState, cwd: Path, now: datetime) -> s
     return f"- {age} · {where} · {verdict}"
 
 
+def _prose(lines: list[str]) -> list[str]:
+    """``lines`` without fenced code blocks and without lines that start with ``>``.
+
+    Only the start of each stripped line is looked at; kept lines are returned unchanged. A
+    fence that is never closed runs to the end. A line that repeats its opening three fence
+    characters later on is inline code, not a fence.
+    """
+    kept: list[str] = []
+    fence: str | None = None
+    for line in lines:
+        stripped = line.strip()
+        if fence is not None:
+            if stripped.startswith(fence):
+                fence = None
+            continue
+        opening = stripped[:3]
+        if opening in ("```", "~~~") and opening not in stripped[3:]:
+            fence = opening
+        elif not stripped.startswith(">"):
+            kept.append(line)
+    return kept
+
+
 def _quote(message: object, limit: int) -> list[str]:
-    """``message`` without blank lines, cut to ``limit`` characters, each line quoted."""
+    """``message`` without blank lines, code blocks or quoted lines, cut to ``limit``.
+
+    When nothing but code blocks and quoted lines is left, those are shown instead.
+    """
     if not isinstance(message, str):
         return []
-    text = "\n".join(line for line in message.strip().splitlines() if line.strip())
+    lines = [line for line in message.strip().splitlines() if line.strip()]
+    text = "\n".join(_prose(lines) or lines)
     if len(text) > limit:
         text = text[: limit - 1] + ELLIPSIS
     return [f"{QUOTE}{line}" for line in text.split("\n") if line.strip()]

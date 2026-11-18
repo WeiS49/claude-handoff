@@ -44,26 +44,21 @@ def _cwd_from_data(data: dict[str, Any]) -> Path | None:
     return path if path.is_dir() else None
 
 
-def _cwd_from_input(raw: bytes) -> Path | None:
-    """The directory named by the hook input's ``cwd``, or None if the input is unusable.
-
-    Fields other than ``cwd`` are ignored.
-    """
-    data = _load_object(raw)
-    return None if data is None else _cwd_from_data(data)
-
-
 def session_start_text(raw: bytes, max_chars: int = MAX_CHARS) -> str:
     """What the SessionStart hook prints for ``raw`` stdin: the briefing plus a newline, or "".
 
     Bad input of any kind yields "": the hook must neither fail session start nor put error
-    text into the new session's context.
+    text into the new session's context. A string ``session_id`` in the input leaves that
+    session's own record out of the briefing: a resumed or compacted session does not need it.
     """
     try:
-        cwd = _cwd_from_input(raw)
-        if cwd is None:
+        data = _load_object(raw)
+        cwd = None if data is None else _cwd_from_data(data)
+        if data is None or cwd is None:
             return ""
-        return build_briefing(cwd, max_chars) + "\n"
+        session_id = data.get("session_id")
+        session = session_id if isinstance(session_id, str) else None
+        return build_briefing(cwd, max_chars, session_id=session) + "\n"
     except HOOK_ERRORS:
         return ""
 

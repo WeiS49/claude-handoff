@@ -27,6 +27,17 @@ def _run_git(cwd: Path, *args: str) -> None:
     )
 
 
+@pytest.fixture(autouse=True)
+def isolated_state_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """Point the state directory under tmp_path for every test, subprocesses included.
+
+    No test can then read or write the real handoff state in the home directory.
+    """
+    state = tmp_path / "handoff-state"
+    monkeypatch.setenv("CLAUDE_HANDOFF_STATE_DIR", str(state))
+    return state
+
+
 @pytest.fixture
 def run_git():
     """The helper that runs git with a fixed test identity."""

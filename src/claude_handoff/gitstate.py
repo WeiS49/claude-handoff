@@ -37,6 +37,49 @@ def _git(cwd: Path, *args: str) -> str | None:
     return result.stdout.rstrip("\n")
 
 
+class GitFailed(Exception):
+    """A git command could not be started, did not finish in time, or failed unexpectedly."""
+
+
+def _git_code(cwd: Path, *args: str) -> int:
+    """Run a git command for its exit code only. Raises ``GitFailed`` if it cannot run."""
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(cwd), *args],
+            capture_output=True,
+            timeout=10,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise GitFailed(str(exc)) from exc
+    return result.returncode
+
+
+def commits_since(cwd: Path, sha: str) -> int | None:
+    """How many commits HEAD has on top of ``sha``: 0 if ``sha`` is HEAD itself.
+
+    None if ``sha`` is not an ancestor of HEAD, names no object in the repository, or the
+    repository has no commit yet. Raises ``GitFailed`` if git cannot answer.
+    """
+    if not sha or sha.startswith("-"):
+        return None  # never let a recorded value be read as a git option
+    # Ancestry first: rev-list --count prints 0 for a commit that is not an ancestor, too.
+    code = _git_code(cwd, "merge-base", "--is-ancestor", sha, "HEAD")
+    if code in (1, 128):
+        return None
+    if code != 0:
+        raise GitFailed(f"git merge-base --is-ancestor exited with {code}")
+    count = _git(cwd, "rev-list", "--count", f"{sha}..HEAD")
+    if count is None or not count.isdigit():
+        raise GitFailed("git rev-list --count gave no count")
+    return int(count)
+
+
+def branch_exists(cwd: Path, name: str) -> bool:
+    """Whether the local branch ``name`` exists. Raises ``GitFailed`` if git cannot answer."""
+    return _git_code(cwd, "show-ref", "--verify", "--quiet", f"refs/heads/{name}") == 0
+
+
 def _parse_status(raw: str) -> tuple[str, ...]:
     """Paths from ``git status --porcelain -z``; -z keeps spaces and non-ASCII names unquoted."""
     paths: list[str] = []

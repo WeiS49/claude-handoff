@@ -141,8 +141,11 @@ that moment, and a verdict. The verdict is `up to date: no commits since`, or
 - `branch <name> no longer exists`, or `was on <name>, now on <branch>`.
 
 Outside a git repository the title line only gives the age. The newest reply is quoted up to
-600 characters, the others up to 200; blank lines are dropped. The whole briefing still fits
-in 2000 characters: the end is cut if needed.
+600 characters, the others up to 200; blank lines are dropped. Fenced code blocks (opened by
+```` ``` ```` or `~~~`) and lines starting with `>` are left out before the limit is applied, so
+the space goes to the prose; if nothing else is left, they are quoted as they are. The saved
+reply itself is unchanged. The whole briefing still fits in 2000 characters: the end is cut if
+needed.
 
 ## Develop
 

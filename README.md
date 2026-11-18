@@ -22,10 +22,12 @@ Early. What works today:
 - `claude-handoff brief` prints the git state of a directory (branch, uncommitted files,
   recent commits) in at most 2000 characters. A directory that is not a git repository is
   reported as such.
+- `claude-handoff hook session-start` is the command for a Claude Code SessionStart hook. It
+  reads the hook's JSON from stdin and prints the briefing for its `cwd`. Registering the
+  hook in `settings.json` is still up to you.
 
 Planned, not built yet:
 
-- A SessionStart hook that injects the briefing.
 - A handoff file written when a session ends or is compacted, replaced each time.
 - Staleness checks: a handoff that is older than the latest commit, or that names a branch
   or file that no longer exists, is marked as possibly stale.
@@ -43,6 +45,20 @@ uv run claude-handoff brief
 ```bash
 uv run claude-handoff brief --cwd /path/to/project --max-chars 1200
 ```
+
+### As a SessionStart hook
+
+`hook session-start` reads the JSON that Claude Code passes to a SessionStart hook on stdin,
+takes its `cwd` field and prints the same text as `brief --cwd` for that directory. Claude
+Code adds a SessionStart hook's stdout to the new session's context. Other fields in the
+input are ignored.
+
+```bash
+echo '{"cwd": "/path/to/project"}' | uv run claude-handoff hook session-start
+```
+
+The hook never makes session start fail: if stdin is empty or not valid JSON, or `cwd` is
+missing or does not name an existing directory, it prints nothing and exits 0.
 
 ## Develop
 

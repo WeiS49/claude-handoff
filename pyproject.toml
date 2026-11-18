@@ -4,6 +4,8 @@ version = "0.1.0"
 description = "Session briefings for Claude Code, derived from ground truth instead of hand-kept notes."
 readme = "README.md"
 requires-python = ">=3.11"
+license = "MIT"
+license-files = ["LICENSE"]
 dependencies = []
 
 [project.scripts]

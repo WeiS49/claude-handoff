@@ -18,10 +18,11 @@ agent 写的笔记只用来记录机器读不到的东西：为什么这样决�
 
 - `claude-handoff brief` 输出一个目录的 git 状态（分支、未提交的文件、最近的 commit），
   最多 2000 个字符。目录不是 git 仓库时会如实说明。
+- `claude-handoff hook session-start` 是给 Claude Code SessionStart hook 用的命令：从 stdin
+  读 hook 的 JSON，输出其中 `cwd` 目录的简报。在 `settings.json` 里注册 hook 仍需自己做。
 
 计划中，尚未实现：
 
-- 在 SessionStart hook 里注入简报。
 - 会话结束或压缩时写一份交接文件，每次覆盖。
 - 过期检查：交接比最新 commit 旧，或者提到的分支、文件已不存在时，标记为可能过期。
 - 在简报里带上项目自身检查命令的结果。
@@ -38,6 +39,19 @@ uv run claude-handoff brief
 ```bash
 uv run claude-handoff brief --cwd /path/to/project --max-chars 1200
 ```
+
+### 作为 SessionStart hook
+
+`hook session-start` 从 stdin 读取 Claude Code 传给 SessionStart hook 的 JSON，取其中的
+`cwd` 字段，输出与对该目录运行 `brief --cwd` 完全相同的文字。SessionStart hook 的 stdout
+会加入新会话的上下文。输入里的其他字段一律忽略。
+
+```bash
+echo '{"cwd": "/path/to/project"}' | uv run claude-handoff hook session-start
+```
+
+hook 不会让会话启动失败：stdin 为空、不是合法 JSON、没有 `cwd`、或 `cwd` 不是一个存在的目录
+时，什么都不输出，退出码 0。
 
 ## 开发
 

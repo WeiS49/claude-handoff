@@ -7,6 +7,7 @@ from pathlib import Path
 
 from . import __version__
 from .briefing import MAX_CHARS, build_briefing
+from .hook import run_session_start
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -21,9 +22,18 @@ def main(argv: list[str] | None = None) -> int:
     brief.add_argument("--cwd", type=Path, default=Path.cwd(), help="directory to describe")
     brief.add_argument("--max-chars", type=int, default=MAX_CHARS, help="size ceiling")
 
+    hook = sub.add_parser("hook", help="entry points for Claude Code hooks")
+    hook_sub = hook.add_subparsers(dest="hook_event", required=True)
+    hook_sub.add_parser(
+        "session-start",
+        help="read SessionStart hook JSON from stdin and print the briefing for its cwd",
+    )
+
     args = parser.parse_args(argv)
     if args.command == "brief":
         print(build_briefing(args.cwd.resolve(), args.max_chars))
+    elif args.command == "hook" and args.hook_event == "session-start":
+        return run_session_start()
     return 0
 
 

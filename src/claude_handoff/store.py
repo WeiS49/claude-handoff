@@ -1,7 +1,8 @@
 """Per-session state kept on this machine, outside the project directory.
 
 Each project has its own directory, and each session one JSON file in it, replaced as a whole
-on every write. Only the newest ``MAX_SESSIONS`` files of a project are kept, so parallel
+on every write. All work trees of one git repository are one project (see ``project_root``),
+so a session in one work tree sees where sessions in the others stopped. Only the newest ``MAX_SESSIONS`` files of a project are kept, so parallel
 sessions in one project do not overwrite each other. The state lives outside the project so
 it never shows up in ``git status`` and cannot be committed by mistake: the saved reply may
 contain anything the session saw.
@@ -17,7 +18,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from .gitstate import git_toplevel
+from .gitstate import git_common_root
 
 STATE_VERSION = 1
 MAX_MESSAGE_CHARS = 4000
@@ -61,12 +62,16 @@ def state_dir() -> Path:
 
 
 def project_root(cwd: Path) -> Path:
-    """The project ``cwd`` belongs to: the git work tree root, or ``cwd`` itself outside git.
+    """The project ``cwd`` belongs to, or ``cwd`` itself outside git.
 
-    ``cwd`` is resolved first, so a directory reached through a symlink maps to the same project.
+    Inside git this is the root of the main checkout, so every work tree of one repository
+    (``git worktree add``) shares one project and sees the others' sessions. Where there is
+    no main checkout (a work tree of a bare repository, a submodule) it is the root of the
+    work tree that contains ``cwd``. ``cwd`` is resolved first, so a directory reached
+    through a symlink maps to the same project.
     """
     resolved = cwd.resolve()
-    return git_toplevel(resolved) or resolved
+    return git_common_root(resolved) or resolved
 
 
 def project_state_dir(project: Path) -> Path:

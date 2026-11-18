@@ -1,3 +1,4 @@
+import subprocess
 from pathlib import Path
 
 from claude_handoff.gitstate import read_git_state
@@ -52,3 +53,43 @@ def test_repo_without_commits(tmp_path: Path, run_git) -> None:
     assert state.is_repo is True
     assert state.recent_commits == ()
     assert state.last_commit_iso is None
+
+
+def _rev_parse_head(repo: Path) -> str:
+    out = subprocess.run(
+        ["git", "-C", str(repo), "rev-parse", "HEAD"], capture_output=True, text=True, check=True
+    )
+    return out.stdout.strip()
+
+
+def test_head_sha_is_full_sha_of_head(repo: Path) -> None:
+    state = read_git_state(repo)
+    assert state.head_sha == _rev_parse_head(repo)
+    assert len(state.head_sha) == 40
+
+
+def test_toplevel_is_resolved_repo_root_from_subdirectory(repo: Path) -> None:
+    sub = repo / "pkg"
+    sub.mkdir()
+    assert read_git_state(repo).toplevel == repo.resolve()
+    assert read_git_state(sub).toplevel == repo.resolve()
+
+
+def test_head_sha_none_without_commits(tmp_path: Path, run_git) -> None:
+    run_git(tmp_path, "init", "-b", "main")
+    state = read_git_state(tmp_path)
+    assert state.head_sha is None
+    assert state.toplevel == tmp_path.resolve()
+
+
+def test_detached_head_keeps_head_sha(repo: Path, run_git) -> None:
+    run_git(repo, "checkout", "--detach")
+    state = read_git_state(repo)
+    assert state.branch is None
+    assert state.head_sha == _rev_parse_head(repo)
+
+
+def test_not_a_repo_has_no_head_or_toplevel(tmp_path: Path) -> None:
+    state = read_git_state(tmp_path)
+    assert state.head_sha is None
+    assert state.toplevel is None

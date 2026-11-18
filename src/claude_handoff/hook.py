@@ -5,31 +5,52 @@ from __future__ import annotations
 import json
 import sys
 from pathlib import Path
+from typing import Any
 
 from .briefing import MAX_CHARS, build_briefing
+from .gitstate import read_git_state
+from .store import project_root, write_state
 
 # Every way reading the input or building the briefing can fail:
 # ValueError covers bad JSON, bad UTF-8 (stdin or git output) and NUL bytes in a path;
 # OSError covers I/O and path resolution; RuntimeError covers symlink loops and
 # RecursionError from deeply nested JSON.
 HOOK_ERRORS = (ValueError, OSError, RuntimeError)
+# The Stop hook also writes a file, so it widens the net: TypeError and LookupError cover
+# JSON serialisation and unexpected shapes of data on the way to the state file.
+STOP_ERRORS = (*HOOK_ERRORS, TypeError, LookupError)
 
 
-def _cwd_from_input(raw: bytes) -> Path | None:
-    """The directory named by the hook input's ``cwd``, or None if the input is unusable.
+def _load_object(raw: bytes) -> dict[str, Any] | None:
+    """The hook input as a JSON object, or None if it is valid JSON of another type.
 
-    Fields other than ``cwd`` are ignored. A relative ``cwd`` resolves against the current
-    working directory, as ``brief --cwd`` does. ``build_briefing`` would describe a missing
-    directory as "not a git repository", so existence is checked here.
+    Bad UTF-8 or bad JSON raises ``ValueError``.
     """
     data = json.loads(raw.decode("utf-8"))
-    if not isinstance(data, dict):
-        return None
+    return data if isinstance(data, dict) else None
+
+
+def _cwd_from_data(data: dict[str, Any]) -> Path | None:
+    """The existing directory named by ``cwd``, resolved, or None.
+
+    A relative ``cwd`` resolves against the current working directory, as ``brief --cwd``
+    does. ``build_briefing`` would describe a missing directory as "not a git repository",
+    so existence is checked here.
+    """
     cwd = data.get("cwd")
     if not isinstance(cwd, str) or not cwd:
         return None
     path = Path(cwd).resolve()
     return path if path.is_dir() else None
+
+
+def _cwd_from_input(raw: bytes) -> Path | None:
+    """The directory named by the hook input's ``cwd``, or None if the input is unusable.
+
+    Fields other than ``cwd`` are ignored.
+    """
+    data = _load_object(raw)
+    return None if data is None else _cwd_from_data(data)
 
 
 def session_start_text(raw: bytes, max_chars: int = MAX_CHARS) -> str:
@@ -55,5 +76,45 @@ def run_session_start() -> int:
             sys.stdout.write(text)
             sys.stdout.flush()
     except HOOK_ERRORS:
+        return 0
+    return 0
+
+
+def record_stop(raw: bytes) -> Path | None:
+    """Save the last reply named in Stop hook input ``raw``; return the state file, or None.
+
+    Nothing is written, and an existing state file is left alone, unless the input is a JSON
+    object with an existing directory as ``cwd`` and a ``last_assistant_message`` string that
+    is not blank. The message is saved as given (not stripped). Fields other than ``cwd``,
+    ``session_id`` and ``last_assistant_message`` are ignored.
+    """
+    data = _load_object(raw)
+    if data is None:
+        return None
+    cwd = _cwd_from_data(data)
+    message = data.get("last_assistant_message")
+    if cwd is None or not isinstance(message, str) or not message.strip():
+        return None
+    session_id = data.get("session_id")
+    project = project_root(cwd)
+    git = read_git_state(project)
+    return write_state(
+        project=project,
+        session_id=session_id if isinstance(session_id, str) else None,
+        branch=git.branch,
+        head=git.head_sha,
+        message=message,
+    )
+
+
+def run_stop() -> int:
+    """Read the Stop hook JSON from stdin and record the last reply. Prints nothing; returns 0.
+
+    A Stop hook runs after every reply, so a failure, including a full disk or a state
+    directory without write permission, is swallowed rather than shown to the session.
+    """
+    try:
+        record_stop(sys.stdin.buffer.read())
+    except STOP_ERRORS:
         return 0
     return 0

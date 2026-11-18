@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+# The one command that decides whether a change is acceptable. CI runs exactly this.
+# Managed by the dev-repo-init skill: project commands go in checks/project.sh, not here.
+set -euo pipefail
+cd "$(dirname "$0")"
+./checks/run-rules.sh
+./checks/project.sh

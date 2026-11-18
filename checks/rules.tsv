@@ -1,0 +1,5 @@
+# One rule per line, three tab-separated fields:
+# <extended regex>	<path prefix, or . for the whole repo>	<message that says how to fix it>
+# Rules come from corrections: when a mistake is corrected, add the rule that would have caught it.
+^(<{7}|>{7})( |$)	.	A merge conflict marker was committed. Resolve the conflict and remove the marker.
+/Users/[A-Za-z0-9_]	.	A real home-directory path was committed to a public repo. Use a placeholder such as /path/to/project, and build test data in tmp_path.

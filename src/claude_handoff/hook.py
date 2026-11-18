@@ -97,7 +97,8 @@ def record_stop(raw: bytes) -> Path | None:
         return None
     session_id = data.get("session_id")
     project = project_root(cwd)
-    git = read_git_state(project)
+    # The branch and HEAD of the work tree the session ran in, not of the main checkout.
+    git = read_git_state(cwd)
     return write_state(
         project=project,
         session_id=session_id if isinstance(session_id, str) else None,

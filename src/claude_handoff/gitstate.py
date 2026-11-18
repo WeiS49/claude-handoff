@@ -99,6 +99,23 @@ def git_toplevel(cwd: Path) -> Path | None:
     return Path(top).resolve() if top else None
 
 
+def git_common_root(cwd: Path) -> Path | None:
+    """The root of the main checkout of the repository that contains ``cwd``, or None.
+
+    Every work tree of one repository (``git worktree add``) maps to the same directory: the
+    parent of the shared ``.git`` directory. When the common git directory is not named
+    ``.git`` (a work tree of a bare repository, a submodule) the root of the work tree that
+    contains ``cwd`` is returned instead. None outside a repository, and whenever git fails.
+    """
+    common = _git(cwd, "rev-parse", "--git-common-dir")
+    if not common:
+        return None
+    common_dir = (cwd / common).resolve()  # an absolute output replaces cwd
+    if common_dir.name == ".git":
+        return common_dir.parent
+    return git_toplevel(cwd)
+
+
 def read_git_state(cwd: Path, max_commits: int = 5) -> GitState:
     """Collect branch, uncommitted files, recent commits, HEAD and work tree root for ``cwd``.
 

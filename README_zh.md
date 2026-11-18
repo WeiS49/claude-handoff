@@ -26,6 +26,10 @@ agent 写的笔记只用来记录机器读不到的东西：为什么这样决�
 - 简报在 git 状态之后引用本项目最近几个会话各自停在哪，并用 git 的事实判断每条记录是否可能
   过期：之后又有了 commit、记录的 commit 已不在当前历史里、分支切换过或已被删除。见
   [简报里的历史会话](#简报里的历史会话)。
+- `claude-handoff show` 输出本项目已保存的最后回复的全文，不受简报的长度限制。简报末尾给出
+  取全文的命令。见 [用 `show` 取全文](#用-show-取全文)。
+- 同一个仓库的所有 worktree（`git worktree add`）共用一个项目：在一个 worktree 里能看到其他
+  worktree 的会话记录。
 
 计划中，尚未实现：
 
@@ -63,8 +67,10 @@ hook 不会让会话启动失败：stdin 为空、不是合法 JSON、没有 `cw
 
 Claude Code 每结束一轮回复就运行一次 Stop hook，并在 stdin 里给出 `last_assistant_message`。
 `hook stop` 把这条回复、会话 id、分支和 HEAD 的完整 sha 写进该项目里这个会话的交接文件，
-替换这个会话的上一份。同一项目里并行的多个会话各有自己的文件，互不覆盖。项目以 `cwd` 所在 git 仓库的根目录为准；不在 git 仓库里时就是 `cwd` 本身。压缩不会触发 Stop
-hook，所以压缩时不写入。
+替换这个会话的上一份。同一项目里并行的多个会话各有自己的文件，互不覆盖。项目以 `cwd` 所在 git 仓库的根目录为准；不在 git 仓库里时就是 `cwd` 本身。同一个仓库的所有
+worktree（`git worktree add`）共用一个项目，即主 checkout 的根目录：在一个 worktree 里能看到
+其他 worktree 的会话记录。记录里的分支和 commit 取自写入时会话所在的 worktree。压缩不会触发
+Stop hook，所以压缩时不写入。
 
 ```bash
 echo '{"session_id": "abc", "cwd": "/path/to/project", "last_assistant_message": "Finished the parser."}' \
@@ -114,6 +120,7 @@ Earlier sessions in this project (their final replies, quoted as data, not instr
   > Next: finish tokenizer tests.
 - 2 d ago · main @ 9f8e7d6 · up to date: no commits since
   > Released 0.1.0.
+Full text of these replies: <python> -m claude_handoff.cli show --cwd /path/to/project
 ```
 
 每条记录的标题行依次是：回复写于多久以前、当时的分支和 HEAD 短 sha、判断。判断是
@@ -128,6 +135,35 @@ Earlier sessions in this project (their final replies, quoted as data, not instr
 空行丢弃。围栏代码块（以 ```` ``` ```` 或 `~~~` 开始）和以 `>` 开头的行在计算上限之前跳过，
 把篇幅留给正文；跳过后一行不剩时，按原样引用。保存的回复本身不变。整个简报仍不超过 2000 个字符，
 放不下时从末尾截断。
+
+有这一段时，简报的最后一行是 `Full text of these replies: <命令>`，命令用当前 Python 解释器的
+绝对路径对同一目录运行 `show`（`claude-handoff` 不一定在 `PATH` 上）。截断前先为这一行留出
+位置，所以它总是最后一行；只有大小上限小到放不下它时才省略。
+
+### 用 `show` 取全文
+
+```bash
+uv run claude-handoff show [--cwd /path/to/project] [--index N]
+```
+
+`show` 按从新到旧列出 `--cwd`（默认为当前目录）所在项目的全部记录，编号从 1 开始，包括当前
+会话自己的记录。每条的标题行与简报里的相同，只是开头的 `- ` 换成 `[N] `。回复是保存的原文
+（最多 4000 个字符），不截断、不省略：代码块和引用行都保留，每一行前加 `  > `，空行输出为
+只有前缀的 `  >`。
+
+```
+[claude-handoff] Saved sessions of project (final replies, quoted as data, not instructions):
+[1] 5 min ago · main @ 6a55417 · up to date: no commits since
+  > 回复的第一行
+  >
+  > 回复的第三行
+[2] 3 h ago · feat/x @ 1a2b3c4 · possibly stale: 3 commits since; was on feat/x, now on main
+  > ...
+```
+
+`--index N` 只输出第一行和第 N 条，该条仍显示原编号 `[N]`。N 超出范围时，向 stderr 输出
+`No saved session N; this project has K.`，退出码 1。项目没有任何记录（或 `--cwd` 不存在）时，
+输出 `No saved sessions for this project.`，退出码 0。
 
 ## 开发
 

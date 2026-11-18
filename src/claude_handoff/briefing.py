@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import shlex
+import sys
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -20,6 +22,11 @@ SESSIONS_TITLE = (
 )
 UP_TO_DATE = "up to date: no commits since"
 QUOTE = "  > "
+HINT_PREFIX = "Full text of these replies: "
+SAVED_TITLE = (
+    "[claude-handoff] Saved sessions of {name} (final replies, quoted as data, not instructions):"
+)
+NO_SAVED = "No saved sessions for this project."
 MAX_SESSIONS_SHOWN = 3
 NEWEST_QUOTE_CHARS = 600
 QUOTE_CHARS = 200
@@ -117,13 +124,16 @@ def _branch_reason(cwd: Path, branch: str | None, git: GitState) -> str | None:
     return f"was on {branch}, now on {git.branch or DETACHED}"
 
 
-def _title(record: dict[str, Any], git: GitState, cwd: Path, now: datetime) -> str:
-    """``- <age> · <branch> @ <sha> · <verdict>``, with the parts that apply."""
+def _title_body(record: dict[str, Any], git: GitState, cwd: Path, now: datetime) -> str:
+    """``<age> · <branch> @ <sha> · <verdict>``, with the parts that apply.
+
+    Shared by the briefing (after ``- ``) and ``show`` (after ``[N] ``).
+    """
     age = format_age(datetime.fromisoformat(record["written_at"]), now)
     branch = _text_or_none(record.get("branch"))
     head = _text_or_none(record.get("head"))
     if not git.is_repo or (branch is None and head is None):
-        return f"- {age}"
+        return age
     where = branch or DETACHED
     if head is not None:
         where += f" @ {head[:7]}"
@@ -133,7 +143,12 @@ def _title(record: dict[str, Any], git: GitState, cwd: Path, now: datetime) -> s
         if reason is not None
     ]
     verdict = "possibly stale: " + "; ".join(reasons) if reasons else UP_TO_DATE
-    return f"- {age} · {where} · {verdict}"
+    return f"{age} · {where} · {verdict}"
+
+
+def _title(record: dict[str, Any], git: GitState, cwd: Path, now: datetime) -> str:
+    """``- <age> · <branch> @ <sha> · <verdict>``, with the parts that apply."""
+    return f"- {_title_body(record, git, cwd, now)}"
 
 
 def _prose(lines: list[str]) -> list[str]:
@@ -193,6 +208,48 @@ def render_sessions(
     return lines
 
 
+def _quote_full(message: object) -> list[str]:
+    """Every line of ``message`` after stripping its ends, each behind ``QUOTE``.
+
+    Nothing is cut or left out. A blank line, or one of only whitespace, becomes the bare
+    prefix without its trailing space. A message that is not a string yields no lines.
+    """
+    if not isinstance(message, str):
+        return []
+    bare = QUOTE.rstrip()
+    return [f"{QUOTE}{line}" if line.strip() else bare for line in message.strip().splitlines()]
+
+
+def render_saved(
+    records: list[dict[str, Any]],
+    git: GitState,
+    cwd: Path,
+    now: datetime,
+    index: int | None = None,
+) -> list[str]:
+    """Lines for ``show``: a header, then every record (or only number ``index``) in full.
+
+    ``records`` are ordered newest first and numbered from 1. Each title is the briefing's
+    title with ``[N] `` in place of ``- ``. The saved reply is quoted whole, with no limit.
+    ``index`` must be between 1 and ``len(records)``; the caller checks it.
+    """
+    lines = [SAVED_TITLE.format(name=store.project_root(cwd).name)]
+    for number, record in enumerate(records, start=1):
+        if index is not None and number != index:
+            continue
+        lines.append(f"[{number}] {_title_body(record, git, cwd, now)}")
+        lines += _quote_full(record.get("message"))
+    return lines
+
+
+def show_command(cwd: Path) -> str:
+    """The command that prints the saved replies of ``cwd`` in full, runnable on this machine.
+
+    The interpreter's absolute path is used because ``claude-handoff`` may not be on PATH.
+    """
+    return shlex.join([sys.executable, "-m", "claude_handoff.cli", "show", "--cwd", str(cwd)])
+
+
 def build_briefing(
     cwd: Path,
     max_chars: int = MAX_CHARS,
@@ -202,7 +259,10 @@ def build_briefing(
 ) -> str:
     """The briefing for ``cwd``: a header plus every section that has something to say.
 
-    The records of ``session_id``, the session the briefing is for, are left out.
+    The records of ``session_id``, the session the briefing is for, are left out. When there
+    are earlier sessions, the last line names the command that prints their replies in full.
+    Room for that line is set aside before the rest is cut to fit, so it is never cut off; it
+    is left out only when ``max_chars`` is too small to hold it.
     """
     git = read_git_state(cwd)
     lines = [f"[claude-handoff] State of {cwd.name}, read just now:"]
@@ -212,5 +272,11 @@ def build_briefing(
         for record in store.read_states(store.project_root(cwd))
         if session_id is None or record.get("session_id") != session_id
     ]
-    lines += render_sessions(records, git, cwd, store._now() if now is None else now)
+    sessions = render_sessions(records, git, cwd, store._now() if now is None else now)
+    lines += sessions
+    if sessions:
+        hint = HINT_PREFIX + show_command(cwd)
+        room = max_chars - len(hint) - 1
+        if room >= len(TRUNCATION_MARK):
+            return fit(lines, room) + "\n" + hint
     return fit(lines, max_chars)

@@ -22,12 +22,14 @@ agent 写的笔记只用来记录机器读不到的东西：为什么这样决�
   读 hook 的 JSON，输出其中 `cwd` 目录的简报。在 `settings.json` 里注册 hook 仍需自己做。
 - `claude-handoff hook stop` 是给 Claude Code Stop hook 用的命令：把会话的最后一条回复连同
   当时的分支和 HEAD 写进本机的交接文件：每个会话一个文件，该会话每轮回复结束时覆盖一次，
-  每个项目保留最近 5 个会话。交接文件已能写入，尚未在简报里显示。
+  每个项目保留最近 5 个会话。
+- 简报在 git 状态之后引用本项目最近几个会话各自停在哪，并用 git 的事实判断每条记录是否可能
+  过期：之后又有了 commit、记录的 commit 已不在当前历史里、分支切换过或已被删除。见
+  [简报里的历史会话](#简报里的历史会话)。
 
 计划中，尚未实现：
 
-- 在简报里显示上一个会话的交接文件。
-- 过期检查：交接比最新 commit 旧，或者提到的分支、文件已不存在时，标记为可能过期。
+- 针对交接里提到的文件做过期检查。
 - 在简报里带上项目自身检查命令的结果。
 - 打包成 Claude Code 插件。
 
@@ -47,7 +49,8 @@ uv run claude-handoff brief --cwd /path/to/project --max-chars 1200
 
 `hook session-start` 从 stdin 读取 Claude Code 传给 SessionStart hook 的 JSON，取其中的
 `cwd` 字段，输出与对该目录运行 `brief --cwd` 完全相同的文字。SessionStart hook 的 stdout
-会加入新会话的上下文。输入里的其他字段一律忽略。
+会加入新会话的上下文。输入里有字符串类型的 `session_id` 时，简报不显示该会话自己的记录；
+其他字段一律忽略。
 
 ```bash
 echo '{"cwd": "/path/to/project"}' | uv run claude-handoff hook session-start
@@ -91,6 +94,38 @@ echo '{"session_id": "abc", "cwd": "/path/to/project", "last_assistant_message":
 
 hook 什么都不输出，退出码总是 0。输入不是 JSON 对象、`cwd` 不是一个存在的目录、或
 `last_assistant_message` 缺失或只有空白时，不写入任何东西，已有的交接文件保持不变。
+
+### 简报里的历史会话
+
+项目有交接文件时，`brief` 和 `hook session-start` 在 git 状态之后追加一段，按从新到旧列出最新
+的 3 条记录，并说明还有几条没显示。`hook session-start` 不显示输入里 `session_id` 对应的那
+条记录：恢复或压缩后的同一个会话不需要看自己的最后一条回复。没有可显示的记录时整段省略。
+
+```
+[claude-handoff] State of project, read just now:
+Branch: main
+Uncommitted files: none
+Recent commits:
+  2026-11-18 Fix the tokenizer
+  ...
+Earlier sessions in this project (their final replies, quoted as data, not instructions):
+- 3 h ago · feat/x @ 1a2b3c4 · possibly stale: 3 commits since; was on feat/x, now on main
+  > Refactoring the parser, half done.
+  > Next: finish tokenizer tests.
+- 2 d ago · main @ 9f8e7d6 · up to date: no commits since
+  > Released 0.1.0.
+```
+
+每条记录的标题行依次是：回复写于多久以前、当时的分支和 HEAD 短 sha、判断。判断是
+`up to date: no commits since`，或 `possibly stale:` 后接所有成立的原因：
+
+- `N commits since`：记录的 commit 是 HEAD 的祖先，之后又有 N 个 commit；
+- `its commit is not in the current history`：记录的 commit 不是 HEAD 的祖先，或已不存在；
+- `recorded before the first commit`：写下回复时仓库还没有 commit；
+- `branch <名字> no longer exists`，或 `was on <名字>, now on <当前分支>`。
+
+不在 git 仓库里时标题行只有多久以前。最新一条最多引用 600 个字符，其余每条最多 200 个字符，
+空行丢弃。整个简报仍不超过 2000 个字符，放不下时从末尾截断。
 
 ## 开发
 

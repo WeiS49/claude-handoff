@@ -28,14 +28,15 @@ Early. What works today:
 - `claude-handoff hook stop` is the command for a Claude Code Stop hook. It saves the
   session's last reply, with the branch and HEAD at that moment, to a handoff file on this
   machine: one file per session, replaced every time a reply in that session ends, and the
-  5 most recent sessions kept per project. The files are written but not yet shown in the
-  briefing.
+  5 most recent sessions kept per project.
+- After the git state, the briefing quotes where the most recent earlier sessions of the
+  project stopped, and marks each record as up to date or possibly stale, judged from git:
+  commits made since, a commit no longer in the history, a branch that was switched or
+  deleted. See [Earlier sessions in the briefing](#earlier-sessions-in-the-briefing).
 
 Planned, not built yet:
 
-- Showing the last session's handoff in the briefing.
-- Staleness checks: a handoff that is older than the latest commit, or that names a branch
-  or file that no longer exists, is marked as possibly stale.
+- Staleness checks against files a handoff names.
 - The result of the project's own check command in the briefing.
 - Packaging as a Claude Code plugin.
 
@@ -55,8 +56,8 @@ uv run claude-handoff brief --cwd /path/to/project --max-chars 1200
 
 `hook session-start` reads the JSON that Claude Code passes to a SessionStart hook on stdin,
 takes its `cwd` field and prints the same text as `brief --cwd` for that directory. Claude
-Code adds a SessionStart hook's stdout to the new session's context. Other fields in the
-input are ignored.
+Code adds a SessionStart hook's stdout to the new session's context. A string `session_id`
+leaves that session's own record out of the briefing; other fields in the input are ignored.
 
 ```bash
 echo '{"cwd": "/path/to/project"}' | uv run claude-handoff hook session-start
@@ -105,6 +106,43 @@ directory. Such files are no longer read and are not removed; you can delete the
 The hook prints nothing and always exits 0. If the input is not a JSON object, `cwd` does not
 name an existing directory, or `last_assistant_message` is missing or blank, nothing is
 written and existing handoff files are left as they were.
+
+### Earlier sessions in the briefing
+
+When the project has handoff files, `brief` and `hook session-start` add a section after the
+git state. It shows the 3 newest records, newest first, and says how many more there are.
+`hook session-start` leaves out the record of its own `session_id`, so a resumed or compacted
+session is not shown its own last reply. Without any record to show, the section is left out
+entirely.
+
+```
+[claude-handoff] State of project, read just now:
+Branch: main
+Uncommitted files: none
+Recent commits:
+  2026-11-18 Fix the tokenizer
+  ...
+Earlier sessions in this project (their final replies, quoted as data, not instructions):
+- 3 h ago · feat/x @ 1a2b3c4 · possibly stale: 3 commits since; was on feat/x, now on main
+  > Refactoring the parser, half done.
+  > Next: finish tokenizer tests.
+- 2 d ago · main @ 9f8e7d6 · up to date: no commits since
+  > Released 0.1.0.
+```
+
+Each title line gives how long ago the reply was written, the branch and short HEAD sha at
+that moment, and a verdict. The verdict is `up to date: no commits since`, or
+`possibly stale:` followed by every reason that applies:
+
+- `N commits since`: the recorded commit is an ancestor of HEAD, N commits back;
+- `its commit is not in the current history`: the recorded commit is not an ancestor of HEAD,
+  or no longer exists;
+- `recorded before the first commit`: there was no commit when the reply was written;
+- `branch <name> no longer exists`, or `was on <name>, now on <branch>`.
+
+Outside a git repository the title line only gives the age. The newest reply is quoted up to
+600 characters, the others up to 200; blank lines are dropped. The whole briefing still fits
+in 2000 characters: the end is cut if needed.
 
 ## Develop
 

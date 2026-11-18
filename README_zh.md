@@ -49,3 +49,7 @@ uv run claude-handoff brief --cwd /path/to/project --max-chars 1200
 
 它先跑 `checks/rules.tsv` 里的项目规则，再跑 ruff 和 pytest。测试用临时生成的 git 仓库，
 仓库里不放任何真实的会话数据。
+
+## 许可证
+
+[MIT](LICENSE)

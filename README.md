@@ -54,3 +54,7 @@ One command decides whether a change is acceptable:
 
 It runs the project rules in `checks/rules.tsv`, then ruff and pytest. Tests build throwaway
 git repositories; the repository never contains real session data.
+
+## Licence
+
+[MIT](LICENSE)

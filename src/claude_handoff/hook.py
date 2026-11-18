@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 from pathlib import Path
 from typing import Any
@@ -19,6 +20,17 @@ HOOK_ERRORS = (ValueError, OSError, RuntimeError)
 # The Stop hook also writes a file, so it widens the net: TypeError and LookupError cover
 # JSON serialisation and unexpected shapes of data on the way to the state file.
 STOP_ERRORS = (*HOOK_ERRORS, TypeError, LookupError)
+# Set by Claude Code for hook processes: "1" in an interactive session, "0" in an unattended
+# one such as `claude -p`. Undocumented, so only the exact value "0" counts as unattended.
+ATTENDED_VARIABLE = "CLAUDE_CODE_SESSION_ATTENDED"
+
+
+def session_unattended() -> bool:
+    """True only when ``$CLAUDE_CODE_SESSION_ATTENDED`` is exactly ``0``.
+
+    Any other value, an empty one or none at all counts as attended.
+    """
+    return os.environ.get(ATTENDED_VARIABLE) == "0"
 
 
 def _load_object(raw: bytes) -> dict[str, Any] | None:
@@ -86,7 +98,8 @@ def record_stop(raw: bytes) -> Path | None:
     Nothing is written, and existing state files are left alone, unless the input is a JSON
     object with an existing directory as ``cwd`` and a ``last_assistant_message`` string that
     is not blank. The message is saved as given (not stripped). Fields other than ``cwd``,
-    ``session_id`` and ``last_assistant_message`` are ignored.
+    ``session_id`` and ``last_assistant_message`` are ignored. A session run unattended (see
+    ``session_unattended``) is saved with ``"attended": false``.
     """
     data = _load_object(raw)
     if data is None:
@@ -105,6 +118,7 @@ def record_stop(raw: bytes) -> Path | None:
         branch=git.branch,
         head=git.head_sha,
         message=message,
+        attended=False if session_unattended() else None,
     )
 
 

@@ -83,7 +83,12 @@ def run_session_start() -> int:
 def record_stop(raw: bytes) -> Path | None:
     """Save the last reply named in Stop hook input ``raw``; return the state file, or None.
 
-    Nothing is written, and an existing state file is left alone, unless the input is a JSON
+    The reply goes to the file of this session (by ``session_id``) in the project's state
+    directory, so parallel sessions in one project keep separate files; a missing or
+    non-string ``session_id`` uses ``unknown.json``. Only the newest few sessions of a project
+    are kept (see ``store.MAX_SESSIONS``).
+
+    Nothing is written, and existing state files are left alone, unless the input is a JSON
     object with an existing directory as ``cwd`` and a ``last_assistant_message`` string that
     is not blank. The message is saved as given (not stripped). Fields other than ``cwd``,
     ``session_id`` and ``last_assistant_message`` are ignored.

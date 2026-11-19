@@ -21,7 +21,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      pull-requests: read
+      pull-requests: write # the acceptance check is posted by a plain step with the workflow token
       issues: read
       id-token: write
 
@@ -67,8 +67,10 @@ jobs:
 
       # The prompt stays inline: the action only runs a workflow file that
       # matches the default branch, so a pull request cannot rewrite it.
-      # Tools are read-only plus one comment command. allowed_bots keeps the
-      # job on acceptEdits, so any tool outside --allowedTools is denied.
+      # Tools are read-only plus Write for one file. allowed_bots keeps the job on
+      # acceptEdits, so any tool outside --allowedTools is denied. The model does not
+      # post the comment itself: in the first real project that failed silently on 2 of
+      # 8 pull requests, with the step still reported as a success.
       - name: Check acceptance criteria against the linked issue
         id: acceptance-check
         if: steps.acceptance-gate.outputs.run == 'true'
@@ -87,7 +89,7 @@ jobs:
             1. Run `gh pr view <PR NUMBER> --repo <REPO> --json title,body,closingIssuesReferences`.
                Linked issues are the closingIssuesReferences, plus issues the body names with
                "Closes", "Fixes", "Resolves" or "Part of" (as #N, owner/repo#N or a URL).
-            2. If there is no linked issue, post this comment with `gh pr comment` and stop:
+            2. If there is no linked issue, write this text to the file named in step 6 and stop:
                <!-- acceptance-check -->
                ## 验收对照
                未找到关联 issue，本次只有常规 review。
@@ -102,13 +104,34 @@ jobs:
                - 无法判断: it needs evidence outside the diff (CI, runtime behaviour, a person or bot named
                  in the issue). Say who or what would verify it.
             5. List tests the criteria call for that the diff does not add, such as edge cases the issue names.
-            6. Post exactly one comment with `gh pr comment`, in Simplified Chinese, under 300 words:
+            6. Do not post anything. With the Write tool, write the comment to
+               ${{ github.workspace }}/acceptance-check.md, in Simplified Chinese, under 300 words.
+               A later step posts that file. Its content, starting at the first line:
                <!-- acceptance-check -->
                ## 验收对照（#<issue>）
                | # | 验收标准（简写） | 结论 | 依据 |
                |---|---|---|---|
                **缺少的测试**：<list, or 无>
           claude_args: |
-            --max-turns 15
-            --allowedTools "Bash(gh pr view:*),Bash(gh pr diff:*),Bash(gh issue view:*),Bash(gh pr comment:*)"
+            --max-turns 20
+            --allowedTools "Bash(gh pr view:*),Bash(gh pr diff:*),Bash(gh issue view:*),Read,Glob,Grep,Write"
+
+      # Posting is a plain step, so a missing table fails the job instead of passing silently.
+      # The action skips pull requests that change workflow files; that case is reported, not failed.
+      - name: Post the acceptance check
+        if: steps.acceptance-gate.outputs.run == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          if grep -q '<!-- acceptance-check -->' acceptance-check.md 2>/dev/null; then
+            gh pr comment "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --body-file acceptance-check.md
+            exit 0
+          fi
+          if gh pr diff "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --name-only | grep -q '^\.github/workflows/'; then
+            echo "::notice::No acceptance check: this pull request changes workflow files, so the Claude action was skipped. The green check is not a review."
+            exit 0
+          fi
+          echo "::error::The acceptance check wrote no table (acceptance-check.md is missing or has no marker). Re-run this job."
+          exit 1
 

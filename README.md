@@ -119,6 +119,14 @@ The hook prints nothing and always exits 0. If the input is not a JSON object, `
 name an existing directory, or `last_assistant_message` is missing or blank, nothing is
 written and existing handoff files are left as they were.
 
+Both hooks use `$CLAUDE_PROJECT_DIR`, which Claude Code sets to the directory the session
+started in, in place of `cwd` when it is an absolute path to an existing directory. A session
+started in `/path/to/project` that later moves into `/path/to/project/notes` or a repository
+nested inside it is still recorded under `/path/to/project`, and the SessionStart briefing
+describes `/path/to/project`. When `cwd` is in the same project (another work tree of the same
+repository), branch and commit still come from `cwd`; otherwise from the starting directory.
+`brief --cwd` and `show --cwd` do not read the variable.
+
 ### Unattended sessions
 
 Sessions started by scripts and tools with `claude -p` run the Stop hook too. Their replies

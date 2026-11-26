@@ -48,6 +48,16 @@ def attended_session(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("CLAUDE_CODE_SESSION_ATTENDED", raising=False)
 
 
+@pytest.fixture(autouse=True)
+def no_project_dir(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Remove CLAUDE_PROJECT_DIR for every test, subprocesses included.
+
+    ``./check`` may run inside a Claude session, which sets it for hook processes; inherited,
+    it would make the hooks describe that directory instead of the test's ``cwd``.
+    """
+    monkeypatch.delenv("CLAUDE_PROJECT_DIR", raising=False)
+
+
 @pytest.fixture
 def run_git():
     """The helper that runs git with a fixed test identity."""

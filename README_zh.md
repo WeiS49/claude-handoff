@@ -103,6 +103,13 @@ echo '{"session_id": "abc", "cwd": "/path/to/project", "last_assistant_message":
 hook 什么都不输出，退出码总是 0。输入不是 JSON 对象、`cwd` 不是一个存在的目录、或
 `last_assistant_message` 缺失或只有空白时，不写入任何东西，已有的交接文件保持不变。
 
+两个 hook 都优先用环境变量 `CLAUDE_PROJECT_DIR`（Claude Code 把它设为会话启动时的目录）代替
+`cwd`，前提是它是绝对路径、指向一个存在的目录。在 `/path/to/project` 启动、后来进入
+`/path/to/project/notes` 或其中嵌套的另一个仓库的会话，记录仍归在 `/path/to/project` 下，
+SessionStart 的简报也描述 `/path/to/project`。`cwd` 与它属于同一个项目（同一仓库的另一个
+worktree）时，分支和 commit 仍取自 `cwd`；否则取自启动目录。`brief --cwd` 和 `show --cwd`
+不读这个变量。
+
 ### 无人值守的会话
 
 脚本和工具用 `claude -p` 启动的会话同样会触发 Stop hook。它们的回复照常记录，但会打上标记，

@@ -64,6 +64,10 @@ echo '{"cwd": "/path/to/project"}' | uv run claude-handoff hook session-start
 hook 不会让会话启动失败：stdin 为空、不是合法 JSON、没有 `cwd`、或 `cwd` 不是一个存在的目录
 时，什么都不输出，退出码 0。
 
+项目目录本身不是 git 仓库、但里面直接放着仓库时（比如文档在外层、代码在 `repo/`），简报会
+列出这些仓库，最多 3 个，每个一行：名字、分支、未提交文件数和最后一次提交。只看直接子目录，
+跳过隐藏目录和符号链接。
+
 ### 作为 Stop hook
 
 Claude Code 每结束一轮回复就运行一次 Stop hook，并在 stdin 里给出 `last_assistant_message`。

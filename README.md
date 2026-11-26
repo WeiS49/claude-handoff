@@ -73,6 +73,11 @@ echo '{"cwd": "/path/to/project"}' | uv run claude-handoff hook session-start
 The hook never makes session start fail: if stdin is empty or not valid JSON, or `cwd` is
 missing or does not name an existing directory, it prints nothing and exits 0.
 
+When the project directory is not a git repository itself but holds repositories directly
+inside it (for example docs at the top and the code in `repo/`), the briefing lists them, up
+to three, one line each: name, branch, uncommitted files and the last commit. Only direct
+children are looked at; hidden directories and symlinks are skipped.
+
 ### As a Stop hook
 
 Claude Code runs a Stop hook each time it finishes a reply and passes `last_assistant_message`

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import shlex
 import sys
 from datetime import datetime
@@ -31,16 +32,83 @@ MAX_SESSIONS_SHOWN = 3
 NEWEST_QUOTE_CHARS = 600
 QUOTE_CHARS = 200
 UNATTENDED_SUFFIX = " · unattended"
+NOT_A_REPO = "Git: this directory is not a git repository."
+NESTED_TITLE_SUFFIX = " Repositories directly inside it:"
+MAX_NESTED_SHOWN = 3
 
 
 def _clip(line: str, width: int = 100) -> str:
     return line if len(line) <= width else line[: width - 1] + "…"
 
 
-def render_git(state: GitState) -> list[str]:
-    """Lines describing the git state. Facts only, phrased as statements."""
+def _nested_candidates(cwd: Path) -> list[Path]:
+    """Direct children of ``cwd`` that look like repositories, sorted by name.
+
+    A candidate is a directory, not a symlink, whose name does not start with ``.`` and that
+    holds an entry named ``.git`` (a directory or a file). A directory that cannot be listed
+    has no candidates.
+    """
+    try:
+        children = list(cwd.iterdir())
+    except OSError:
+        return []
+    found: list[Path] = []
+    for child in children:
+        try:
+            if (
+                not child.name.startswith(".")
+                and not child.is_symlink()
+                and child.is_dir()
+                and os.path.lexists(child / ".git")
+            ):
+                found.append(child)
+        except OSError:
+            continue
+    return sorted(found, key=lambda path: path.name)
+
+
+def _nested_line(child: Path) -> str:
+    """``  <name>/ · <branch> · <uncommitted> · <last commit>``, or ``  <name>/ · unreadable``.
+
+    Unreadable when git finds no work tree, or finds one rooted somewhere else than ``child``.
+    """
+    state = read_git_state(child, max_commits=1)
+    if not state.is_repo or state.toplevel != child.resolve():
+        return _clip(f"  {child.name}/ · unreadable")
+    count = len(state.dirty_files)
+    parts = [
+        f"  {child.name}/",
+        state.branch or DETACHED,
+        f"{count} uncommitted" if count else "clean",
+        f"last commit {state.recent_commits[0]}" if state.recent_commits else "no commits yet",
+    ]
+    return _clip(" · ".join(parts))
+
+
+def render_nested(cwd: Path) -> list[str]:
+    """Lines for the repositories directly inside ``cwd``, a directory that is not one itself.
+
+    No candidates yield the single "not a git repository" line. Git runs only for the first
+    ``MAX_NESTED_SHOWN`` candidates; the rest are counted.
+    """
+    candidates = _nested_candidates(cwd)
+    if not candidates:
+        return [NOT_A_REPO]
+    lines = [NOT_A_REPO + NESTED_TITLE_SUFFIX]
+    lines += [_nested_line(child) for child in candidates[:MAX_NESTED_SHOWN]]
+    rest = len(candidates) - MAX_NESTED_SHOWN
+    if rest > 0:
+        lines.append(f"  … and {rest} more")
+    return lines
+
+
+def render_git(state: GitState, cwd: Path | None = None) -> list[str]:
+    """Lines describing the git state. Facts only, phrased as statements.
+
+    Outside a repository, ``cwd`` (when given) is searched one level deep for repositories.
+    """
     if not state.is_repo:
-        return ["Git: this directory is not a git repository."]
+        return render_nested(cwd) if cwd is not None else [NOT_A_REPO]
 
     lines = [f"Branch: {state.branch or '(detached HEAD)'}"]
     count = len(state.dirty_files)
@@ -278,7 +346,7 @@ def build_briefing(
     """
     git = read_git_state(cwd)
     lines = [f"[claude-handoff] State of {cwd.name}, read just now:"]
-    lines += render_git(git)
+    lines += render_git(git, cwd)
     records = [
         record
         for record in store.read_states(store.project_root(cwd))
